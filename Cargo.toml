@@ -1,0 +1,17 @@
+[package]
+name = "zygorguide-lsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+tree-sitter = "0.26"
+tree-sitter-zygorguide = { path = "../tree-sitter-zygorguide" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dashmap = "6"
+ropey = "1"
+log = "0.4"
+env_logger = "0.11"
+regex = "1"
