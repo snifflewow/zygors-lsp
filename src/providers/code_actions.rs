@@ -20,6 +20,12 @@ pub fn code_actions(
             continue;
         }
 
+        if let Some(action) =
+            make_add_goto_action(eref, model, db, source, content_offset, uri, ref_range)
+        {
+            actions.push(action);
+        }
+
         let db_name = match eref.kind {
             EntityKind::Quest => db.quests.get(&eref.id).map(|q| q.title.as_str()),
             EntityKind::Unit => db.units.get(&eref.id).map(|u| u.name.as_str()),
@@ -103,6 +109,78 @@ fn exists_in_table(db: &Database, id: u32, kind: EntityKind) -> bool {
         EntityKind::Object => db.objects.contains_key(&id),
         EntityKind::Spell | EntityKind::Unknown => false,
     }
+}
+
+fn make_add_goto_action(
+    eref: &crate::guide::types::EntityRef,
+    model: &GuideModel,
+    db: &Database,
+    source: &str,
+    content_offset: usize,
+    uri: &Url,
+    ref_range: Range,
+) -> Option<CodeActionOrCommand> {
+    let has_coords = matches!(
+        eref.action.as_str(),
+        "talk" | "kill" | "click" | "clicknpc" | "vendor" | "trainer"
+    );
+    if !has_coords {
+        return None;
+    }
+
+    let line_start_byte = content_offset + eref.byte_range.start;
+    let line_start = source[..line_start_byte].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = source[line_start_byte..]
+        .find('\n')
+        .map(|i| line_start_byte + i)
+        .unwrap_or(source.len());
+    let line_text = &source[line_start..line_end];
+
+    if line_text.contains("|goto") || line_text.contains("|at") {
+        return None;
+    }
+
+    let goto_text = match eref.kind {
+        EntityKind::Unit => {
+            let unit = db.units.get(&eref.id)?;
+            let coord = unit.coords.first()?;
+            let zone = db.zones.get(&coord.zone_id)?;
+            format!("|goto {} {:.2},{:.2}", zone.name, coord.x, coord.y)
+        }
+        EntityKind::Object => {
+            let obj = db.objects.get(&eref.id)?;
+            let coord = obj.coords.first()?;
+            let zone = db.zones.get(&coord.zone_id)?;
+            format!("|goto {} {:.2},{:.2}", zone.name, coord.x, coord.y)
+        }
+        _ => return None,
+    };
+
+    let insert_pos = Position {
+        line: ref_range.start.line,
+        character: (line_end - line_start) as u32,
+    };
+
+    let edit = TextEdit {
+        range: Range {
+            start: insert_pos,
+            end: insert_pos,
+        },
+        new_text: format!("  {}", goto_text),
+    };
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Add {}", goto_text),
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }))
 }
 
 fn find_closest_by_name(

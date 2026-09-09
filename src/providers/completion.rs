@@ -139,24 +139,34 @@ fn complete_entities(
         .filter(|(name, _)| name.to_lowercase().starts_with(&search_prefix))
         .take(50)
         .map(|(name, id)| {
-            let detail = match kind_label {
-                "quest" => db
-                    .quests
-                    .get(id)
-                    .map(|q| format!("Quest [{}] (lvl {})", id, q.level)),
-                "unit" => db
-                    .units
-                    .get(id)
-                    .map(|u| format!("NPC [{}] (lvl {})", id, u.level)),
-                "item" => Some(format!("Item [{}]", id)),
-                "object" => Some(format!("Object [{}]", id)),
-                _ => None,
+            let (detail, insert_text) = match kind_label {
+                "quest" => (
+                    db.quests
+                        .get(id)
+                        .map(|q| format!("Quest [{}] (lvl {})", id, q.level)),
+                    format!("{}##{}", name, id),
+                ),
+                "unit" => {
+                    let detail = db
+                        .units
+                        .get(id)
+                        .map(|u| format!("NPC [{}] (lvl {})", id, u.level));
+                    let text = build_insert_with_goto_unit(name, *id, db);
+                    (detail, text)
+                }
+                "object" => {
+                    let detail = Some(format!("Object [{}]", id));
+                    let text = build_insert_with_goto_object(name, *id, db);
+                    (detail, text)
+                }
+                "item" => (Some(format!("Item [{}]", id)), format!("{}##{}", name, id)),
+                _ => (None, format!("{}##{}", name, id)),
             };
             CompletionItem {
                 label: name.clone(),
                 kind: Some(CompletionItemKind::VALUE),
                 detail,
-                insert_text: Some(format!("{}##{}", name, id)),
+                insert_text: Some(insert_text),
                 ..Default::default()
             }
         })
@@ -166,6 +176,34 @@ fn complete_entities(
         is_incomplete: items.len() >= 50,
         items,
     })
+}
+
+fn build_insert_with_goto_unit(name: &str, id: u32, db: &Database) -> String {
+    if let Some(unit) = db.units.get(&id) {
+        if let Some(coord) = unit.coords.first() {
+            if let Some(zone) = db.zones.get(&coord.zone_id) {
+                return format!(
+                    "{}##{}  |goto {} {:.2},{:.2}",
+                    name, id, zone.name, coord.x, coord.y
+                );
+            }
+        }
+    }
+    format!("{}##{}", name, id)
+}
+
+fn build_insert_with_goto_object(name: &str, id: u32, db: &Database) -> String {
+    if let Some(obj) = db.objects.get(&id) {
+        if let Some(coord) = obj.coords.first() {
+            if let Some(zone) = db.zones.get(&coord.zone_id) {
+                return format!(
+                    "{}##{}  |goto {} {:.2},{:.2}",
+                    name, id, zone.name, coord.x, coord.y
+                );
+            }
+        }
+    }
+    format!("{}##{}", name, id)
 }
 
 fn complete_zones(names: &[(String, u32)], prefix: &str) -> CompletionResponse {
